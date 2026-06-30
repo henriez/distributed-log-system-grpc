@@ -1,0 +1,32 @@
+services:
+  node1:
+    build: ./server
+    command: python -u server.py node1 50051
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./data/node1:/app/data
+
+  node2:
+    build: ./server
+    command: python -u server.py node2 50052
+    ports:
+      - "50052:50052"
+    volumes:
+      - ./data/node2:/app/data
+
+  node3:
+    build: ./server
+    command: python -u server.py node3 50053
+    ports:
+      - "50053:50053"
+    volumes:
+      - ./data/node3:/app/data
+
+  node4:
+    build: ./server
+    command: python -u server.py node4 50054
+    ports:
+      - "50054:50054"
+    volumes:
+      - ./data/node4:/app/data
