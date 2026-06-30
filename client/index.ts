@@ -5,7 +5,7 @@ import inquirer from "inquirer";
 import chalk from "chalk";
 import figlet from "figlet";
 
-const PROTO_PATH = path.join(__dirname, "..", "proto", "raft.proto");
+const PROTO_PATH = path.join(__dirname, "..", "proto", "raft_client.proto");
 
 const NODE_PORTS: Record<string, number> = {
   node1: 50051,
@@ -40,7 +40,7 @@ function createClient(port: number) {
     oneofs: true,
   });
   const proto = grpc.loadPackageDefinition(packageDef) as any;
-  const client = new proto.raft.RaftNode(target, grpc.credentials.createInsecure());
+  const client = new proto.raft.client.RaftClientAPI(target, grpc.credentials.createInsecure());
   return { client, target };
 }
 
@@ -153,6 +153,14 @@ async function main() {
 
     if (action === 'c') {
       const result = await executeWithFailover("consume", null, port, client);
+
+      if (result.error) {
+        console.log(chalk.red(`[!] ${result.error}`));
+        await inquirer.prompt([{ type: 'input', name: 'pause', message: 'Press Enter to continue...' }]);
+        clearScreen();
+        continue;
+      }
+
       let resp = result.resp as ConsumeResponse;
       if (resp.success) {
         if (resp.commited_data.length === 0) console.log(chalk.blue("No committed data yet"));

@@ -3,7 +3,8 @@ import time
 
 import grpc
 
-import raft_pb2_grpc
+import raft_internal_pb2_grpc
+import raft_client_pb2_grpc
 from raft_node import RaftNode
 from concurrent import futures
 
@@ -28,7 +29,7 @@ def main() -> None:
         if peer_id == node_id:
             continue
         channel = grpc.insecure_channel(peer_host)
-        stub = raft_pb2_grpc.RaftNodeStub(channel)
+        stub = raft_internal_pb2_grpc.RaftInternalStub(channel)
         peer_stubs[peer_id] = stub
 
     db_path = f"/app/data/{node_id}.db"
@@ -36,7 +37,8 @@ def main() -> None:
     node = RaftNode(node_id, db_path, peer_stubs)
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
-    raft_pb2_grpc.add_RaftNodeServicer_to_server(node, server)
+    raft_internal_pb2_grpc.add_RaftInternalServicer_to_server(node, server)
+    raft_client_pb2_grpc.add_RaftClientAPIServicer_to_server(node, server)
     server.add_insecure_port(f"0.0.0.0:{port}")
     server.start()
 

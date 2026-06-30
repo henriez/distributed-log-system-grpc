@@ -6,8 +6,10 @@ from typing import Optional
 
 import grpc
 
-import raft_pb2
-import raft_pb2_grpc
+import raft_internal_pb2
+import raft_internal_pb2_grpc
+import raft_client_pb2
+import raft_client_pb2_grpc
 from database import RaftDatabase
 
 FOLLOWER = 0
@@ -19,9 +21,11 @@ ELECTION_TIMEOUT_MAX = 0.600
 HEARTBEAT_INTERVAL = 0.100
 
 
-class RaftNode(raft_pb2_grpc.RaftNodeServicer):
+class RaftNode(
+    raft_internal_pb2_grpc.RaftInternalServicer,
+    raft_client_pb2_grpc.RaftClientAPIServicer):
     def __init__(self, node_id: str, db_path: str,
-                 peer_stubs: dict[str, raft_pb2_grpc.RaftNodeStub]):
+                 peer_stubs: dict[str, raft_internal_pb2_grpc.RaftInternalStub]):
         self.node_id = node_id
         self.db = RaftDatabase(db_path)
         self.peer_stubs = peer_stubs
@@ -82,10 +86,10 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
         votes_needed = 3
         votes_lock = threading.Lock()
 
-        def request_vote(stub: raft_pb2_grpc.RaftNodeStub) -> None:
+        def request_vote(stub: raft_internal_pb2_grpc.RaftInternalStub) -> None:
             nonlocal votes_granted
             try:
-                req = raft_pb2.VoteRequest(
+                req = raft_internal_pb2.VoteRequest(
                     term=term,
                     candidate_id=self.node_id,
                     last_log_index=last_log_index,
@@ -165,7 +169,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     prev_log_term = entry["term"]
             entries = self.db.get_logs_from(next_idx)
             entries_pb = [
-                raft_pb2.LogEntry(
+                raft_internal_pb2.LogEntry(
                     log_index=e["log_index"],
                     term=e["term"],
                     data=e["data"],
@@ -173,7 +177,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 )
                 for e in entries
             ]
-            req = raft_pb2.AppendRequest(
+            req = raft_internal_pb2.AppendRequest(
                 term=self.current_term,
                 leader_id=self.node_id,
                 prev_log_index=prev_log_index,
@@ -241,11 +245,11 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             if event:
                 event.set()
 
-    def RequestVote(self, request: raft_pb2.VoteRequest,
-                    context) -> raft_pb2.VoteResponse:
+    def RequestVote(self, request: raft_internal_pb2.VoteRequest,
+                    context) -> raft_internal_pb2.VoteResponse:
         with self.lock:
             if request.term < self.current_term:
-                return raft_pb2.VoteResponse(
+                return raft_internal_pb2.VoteResponse(
                     term=self.current_term, vote_granted=False
                 )
 
@@ -253,7 +257,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 self._become_follower(request.term)
 
             if self.voted_for is not None and self.voted_for != request.candidate_id:
-                return raft_pb2.VoteResponse(
+                return raft_internal_pb2.VoteResponse(
                     term=self.current_term, vote_granted=False
                 )
 
@@ -265,22 +269,22 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                 )
             )
             if not log_ok:
-                return raft_pb2.VoteResponse(
+                return raft_internal_pb2.VoteResponse(
                     term=self.current_term, vote_granted=False
                 )
 
             self.voted_for = request.candidate_id
             self.db.update_state(self.current_term, self.voted_for, self.commit_index)
             self._reset_election_timer()
-            return raft_pb2.VoteResponse(
+            return raft_internal_pb2.VoteResponse(
                 term=self.current_term, vote_granted=True
             )
 
-    def AppendEntries(self, request: raft_pb2.AppendRequest,
-                      context) -> raft_pb2.AppendResponse:
+    def AppendEntries(self, request: raft_internal_pb2.AppendRequest,
+                      context) -> raft_internal_pb2.AppendResponse:
         with self.lock:
             if request.term < self.current_term:
-                return raft_pb2.AppendResponse(
+                return raft_internal_pb2.AppendResponse(
                     term=self.current_term, success=False,
                     conflict_index=0, conflict_term=0,
                 )
@@ -294,7 +298,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
             if request.prev_log_index > 0:
                 entry = self.db.get_log_entry(request.prev_log_index)
                 if entry is None:
-                    return raft_pb2.AppendResponse(
+                    return raft_internal_pb2.AppendResponse(
                         term=self.current_term, success=False,
                         conflict_index=self.last_log_index + 1,
                         conflict_term=0,
@@ -307,7 +311,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                         if e["term"] == conflict_term:
                             conflict_index = e["log_index"]
                             break
-                    return raft_pb2.AppendResponse(
+                    return raft_internal_pb2.AppendResponse(
                         term=self.current_term, success=False,
                         conflict_index=conflict_index,
                         conflict_term=conflict_term,
@@ -331,7 +335,7 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     expected_hash = hashlib.sha256(content.encode()).hexdigest()
 
                     if expected_hash != entry_pb.hash:
-                        return raft_pb2_grpc.AppendResponse(
+                        return raft_internal_pb2.AppendResponse(
                             term=self.current_term, success=False,
                             conflict_index=entry_pb.log_index,
                             conflict_term=0,
@@ -356,16 +360,16 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
                     self.current_term, self.voted_for, self.commit_index
                 )
 
-            return raft_pb2.AppendResponse(
+            return raft_internal_pb2.AppendResponse(
                 term=self.current_term, success=True,
                 conflict_index=0, conflict_term=0,
             )
 
-    def PublishData(self, request: raft_pb2.PublishRequest,
-                    context) -> raft_pb2.PublishResponse:
+    def PublishData(self, request: raft_client_pb2.PublishRequest,
+                    context) -> raft_client_pb2.PublishResponse:
         with self.lock:
             if self.state != LEADER:
-                return raft_pb2.PublishResponse(
+                return raft_client_pb2.PublishResponse(
                     success=False, leader_id=self.leader_id or "",
                     message=f"Not leader, redirect to {self.leader_id or 'unknown'}",
                 )
@@ -391,30 +395,30 @@ class RaftNode(raft_pb2_grpc.RaftNodeServicer):
 
         with self.lock:
             if self.state != LEADER:
-                return raft_pb2.PublishResponse(
+                return raft_client_pb2.PublishResponse(
                     success=False, leader_id=self.leader_id or "",
                     message="No longer leader during replication",
                 )
             if not committed:
                 self.pending_commits.pop(log_index, None)
-                return raft_pb2.PublishResponse(
+                return raft_client_pb2.PublishResponse(
                     success=False, leader_id=self.node_id,
                     message="Replication timeout, entry not committed",
                 )
-            return raft_pb2.PublishResponse(
+            return raft_client_pb2.PublishResponse(
                 success=True, leader_id=self.node_id,
                 message="Data published and committed",
             )
 
-    def ConsumeData(self, request: raft_pb2.Empty,
-                    context) -> raft_pb2.ConsumeResponse:
+    def ConsumeData(self, request: raft_client_pb2.Empty,
+                    context) -> raft_client_pb2.ConsumeResponse:
         with self.lock:
             logs = self.db.get_logs_from(1)
             committed = [
                 log["data"] for log in logs
                 if log["log_index"] <= self.commit_index
             ]
-            return raft_pb2.ConsumeResponse(
+            return raft_client_pb2.ConsumeResponse(
                 success=True, leader_id=self.leader_id or "",
                 commited_data=committed,
             )

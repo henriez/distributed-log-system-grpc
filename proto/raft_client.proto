@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package raft.client;
+
+service RaftClientAPI {
+  rpc PublishData (PublishRequest) returns (PublishResponse);
+  rpc ConsumeData (Empty) returns (ConsumeResponse);
+}
+
+message PublishRequest {
+  string data = 1;
+}
+
+message PublishResponse {
+  bool success = 1;
+  string leader_id = 2;
+  string message = 3;
+}
+
+message Empty {}
+
+message ConsumeResponse {
+  bool success = 1;
+  string leader_id = 2;
+  repeated string commited_data = 3;
+}
